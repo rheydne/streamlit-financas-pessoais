@@ -1,128 +1,142 @@
 import streamlit as st
 import pandas as pd
+from datetime import date
+
+# Configuração da Página
+st.set_page_config(page_title='Finanças', page_icon=':classical_building:')
+
+# ==========================
+# Funções Auxiliares
+# ==========================
 
 def tratamento_csv_entrada(df):
-    df['Valor'] = df['Valor'].str.replace('R$ ', '', regex=False)
-    df['Valor'] = df['Valor'].str.replace('.', '', regex=False)
-    df['Valor'] = df['Valor'].str.replace(',', '.', regex=False)
-    df['Valor'] = df['Valor'].astype(float)
+    df['Valor'] = (
+        df['Valor']
+        .str.replace('R$ ', '', regex=False)
+        .str.replace('.', '', regex=False)
+        .str.replace(',', '.', regex=False)
+        .astype(float)
+    )
     df['Data'] = pd.to_datetime(df['Data'], format='%d/%m/%Y').dt.date
-
     return df
 
 def calc_general_stats(df):
-    df_data = df.groupby(by='Data')[['Valor']].sum()
-     
+    df_data = df.groupby('Data')[['Valor']].sum()
     df_data['lag_1'] = df_data['Valor'].shift(1)
 
     df_data['Diferença Mensal'] = df_data['Valor'] - df_data['lag_1']
+    df_data['Dif Mensal Relativa'] = df_data['Valor'] / df_data['lag_1'] - 1
 
-    df_data['Dif Mensal Média 6M'] = df_data['Diferença Mensal'].rolling(6).mean()
-    df_data['Dif Mensal Média 12M'] = df_data['Diferença Mensal'].rolling(12).mean()
-    df_data['Dif Mensal Média 24M'] = df_data['Diferença Mensal'].rolling(24).mean()
+    for meses in [6, 12, 24]:
+        df_data[f'Dif Mensal Média {meses}M'] = df_data['Diferença Mensal'].rolling(meses).mean()
+        df_data[f'Evolução Total {meses}M'] = df_data['Valor'].rolling(meses).apply(lambda x: x[-1] - x[0])
+        df_data[f'Evolução Rel {meses}M'] = df_data['Valor'].rolling(meses).apply(lambda x: x[-1] / x[0] - 1)
 
-    df_data['Dif Mensal Relativa'] = (df_data['Valor'] / df_data['lag_1'] - 1)
-
-    df_data['Evolução Total 6M'] = df_data['Valor'].rolling(6).apply(lambda x: x[-1] - x[0])
-    df_data['Evolução Total 12M'] = df_data['Valor'].rolling(12).apply(lambda x: x[-1] - x[0])
-    df_data['Evolução Total 24M'] = df_data['Valor'].rolling(24).apply(lambda x: x[-1] - x[0])
-     
-    df_data['Evolução Rel 6M'] = df_data['Valor'].rolling(6).apply(lambda x: x[-1] / x[0] - 1)
-    df_data['Evolução Rel 12M'] = df_data['Valor'].rolling(12).apply(lambda x: x[-1] / x[0] - 1)
-    df_data['Evolução Rel 24M'] = df_data['Valor'].rolling(24).apply(lambda x: x[-1] / x[0] - 1)
-
-    df_data = df_data.drop('lag_1', axis=1)
-
+    df_data.drop('lag_1', axis=1, inplace=True)
     return df_data
 
-st.set_page_config(page_title='Finanças', page_icon=':classical_building:')
+def formatador_valores():
+    fmt = {'Valor': st.column_config.NumberColumn('Valor', format='R$ %.2f'),
+           'Diferença Mensal': st.column_config.NumberColumn('Diferença Mensal', format='R$ %.2f'),
+           'Dif Mensal Relativa': st.column_config.NumberColumn('Dif Mensal Relativa', format='percent')}
+    
+    for meses in [6, 12, 24]:
+        fmt[f'Dif Mensal Média {meses}M'] = st.column_config.NumberColumn(f'Dif Mensal Média {meses}M', format='R$ %.2f')
+        fmt[f'Evolução Total {meses}M'] = st.column_config.NumberColumn(f'Evolução Total {meses}M', format='R$ %.2f')
+        fmt[f'Evolução Rel {meses}M'] = st.column_config.NumberColumn(f'Evolução Rel {meses}M', format='percent')
+    return fmt
+
+# ==========================
+# Interface
+# ==========================
 
 st.markdown('''
-    # Bem vindo!
-                
+    # Bem-vindo!
     ## Seu APP Financeiro!
-                
     Esperamos que você se agrade de nossa solução para suas finanças.
 ''')
 
-# Widget de leitura dos dados de um csv
-file_upload = st.file_uploader(label='Insira seu arquivo', type=['csv'])
+# Upload
+file_upload = st.file_uploader('Insira seu arquivo', type=['csv'])
 
 if file_upload:
     df = pd.read_csv(file_upload)
     df = tratamento_csv_entrada(df)
-    
-    # Formatação coluna 'Valor'
-    columns_fmt = {
-        'Valor':st.column_config.NumberColumn('Valor', format='R$ %.2f')
-        }
-    
-    # Exibição dos dados no App, tabela crua sem tratamentos
-    exp1 = st.expander('Dados Brutos')
-    # st.dataframe(df, hide_index=True, column_config=columns_fmt)
-    exp1.dataframe(df, hide_index=True, column_config=columns_fmt)
 
-    # Visão por instituição
-    exp2 = st.expander('Intituições')
-    df_instituicao = df.pivot_table(index='Data', columns='Instituição', values='Valor')
+    # ==========================
+    # Dados Brutos
+    # ==========================
+    with st.expander('Dados Brutos'):
+        st.dataframe(df, hide_index=True, column_config={'Valor': st.column_config.NumberColumn('Valor', format='R$ %.2f')})
 
-    # Abas para diferentes visões (dentro de um "expander")
-    tab_data, tab_history, tab_share = exp2.tabs(['Dados', 'Histórico', 'Distribuição'])
-    
-    # Aba por instituição
-    with tab_data: 
-        st.dataframe(df_instituicao)
-    
-    # Aba gráfico de linhas 
-    with tab_history:
-        st.line_chart(df_instituicao)
+    # ==========================
+    # Visão por Instituição
+    # ==========================
+    with st.expander('Instituições'):
+        df_instituicao = df.pivot_table(index='Data', columns='Instituição', values='Valor')
 
-    # Aba última data de dados
-    with tab_share:
-        # Filtro de data
-        date = st.selectbox('Data para Distribuição', df_instituicao.index)
-        # Gráfico de barras, usando o filtro selecionado
-        st.bar_chart(df_instituicao.loc[date])
+        tab_data, tab_history, tab_share = st.tabs(['Dados', 'Histórico', 'Distribuição'])
 
-    # Visão de Estatísticas Gerais
-    exp3 = st.expander('Estatísticas Gerais')
+        with tab_data:
+            st.dataframe(df_instituicao)
 
-    columns_fmt = {
-        'Valor':st.column_config.NumberColumn('Valor', format='R$ %.2f'),
-        'Diferença Mensal':st.column_config.NumberColumn('Diferença Mensal', format='R$ %.2f'),
-        'Dif Mensal Média 6M':st.column_config.NumberColumn('Dif Mensal Média 6M', format='R$ %.2f'),
-        'Dif Mensal Média 12M':st.column_config.NumberColumn('Dif Mensal Média 12M', format='R$ %.2f'),
-        'Dif Mensal Média 24M':st.column_config.NumberColumn('Dif Mensal Média 24M', format='R$ %.2f'),
-        'Dif Mensal Relativa':st.column_config.NumberColumn('Dif Mensal Relativa', format='percent'),
-        'Evolução Total 6M':st.column_config.NumberColumn('Evolução Total 6M', format='R$ %.2f'),
-        'Evolução Total 12M':st.column_config.NumberColumn('Evolução Total 12M', format='R$ %.2f'),
-        'Evolução Total 24M':st.column_config.NumberColumn('Evolução Total 24M', format='R$ %.2f'),
-        'Evolução Rel 6M':st.column_config.NumberColumn('Evolução Rel 6M', format='percent'),
-        'Evolução Rel 12M':st.column_config.NumberColumn('Evolução Rel 12M', format='percent'),
-        'Evolução Rel 24M':st.column_config.NumberColumn('Evolução Rel 24M', format='percent')
-    }
+        with tab_history:
+            st.line_chart(df_instituicao)
 
-    df_stats = calc_general_stats(df)
+        with tab_share:
+            selected_date = st.selectbox('Data para Distribuição', df_instituicao.index)
+            st.bar_chart(df_instituicao.loc[selected_date])
 
-    tab_stats, tab_abs, tab_rel = exp3.tabs(tabs=['Dados', 'Histórico de Evolução', 'Crescimento Relativo'])
+    # ==========================
+    # Estatísticas Gerais
+    # ==========================
+    with st.expander('Estatísticas Gerais'):
+        df_stats = calc_general_stats(df)
+        column_fmt = formatador_valores()
 
-    with tab_stats:
-        st.dataframe(df_stats, column_config=columns_fmt)
+        tab_stats, tab_abs, tab_rel = st.tabs(['Dados', 'Histórico de Evolução', 'Crescimento Relativo'])
 
-    with tab_abs:
-        abs_cols = [
-            'Diferença Mensal',
-            'Dif Mensal Média 6M',
-            'Dif Mensal Média 12M',
-            'Dif Mensal Média 24M'
-        ]
-        st.line_chart(df_stats[abs_cols])
-    
-    with tab_rel:
-        rel_cols = [
-            'Dif Mensal Relativa',
-            'Evolução Rel 6M',
-            'Evolução Rel 12M',
-            'Evolução Rel 24M'
-        ]
-        st.line_chart(data=df_stats[rel_cols])
+        with tab_stats:
+            st.dataframe(df_stats, column_config=column_fmt)
+
+        with tab_abs:
+            abs_cols = [col for col in df_stats.columns if 'Dif' in col and 'Relativa' not in col]
+            st.line_chart(df_stats[abs_cols])
+
+        with tab_rel:
+            rel_cols = [col for col in df_stats.columns if 'Rel' in col]
+            st.line_chart(df_stats[rel_cols])
+
+    # ==========================
+    # Metas
+    # ==========================
+    with st.expander('Metas'):
+        col1, col2 = st.columns(2)
+
+        max_data = max(df_stats.index) if not df_stats.empty else date.today()
+        data_inicio_meta = col1.date_input('Início da Meta', max_value=max_data)
+
+        data_filtrada = max([d for d in df_stats.index if d <= data_inicio_meta], default=max_data)
+
+        col2.number_input('**Salário Bruto**', min_value=0.0, format='%.2f')
+        sal_liq = col2.number_input('**Salário Líquido**', min_value=0.0, format='%.2f')
+        custos_fixos = col1.number_input('**Custos Fixos**', min_value=0.0, format='%.2f')
+
+        valor_inicio = df_stats.loc[data_filtrada]['Valor'] if data_filtrada in df_stats.index else 0.0
+        col1.markdown(f'**Patrimônio no Início da Meta:** R$ {valor_inicio:.2f}')
+
+        mensal = sal_liq - custos_fixos
+        anual = mensal * 12
+
+        col1_pot, col2_pot = st.columns(2)
+        with col1_pot.container(border=True):
+            st.markdown(f'**Potencial Arrecadação Mensal:**\n\nR$ {mensal:.2f}')
+        with col2_pot.container(border=True):
+            st.markdown(f'**Potencial Arrecadação Anual:**\n\nR$ {anual:.2f}')
+
+        col1_meta, col2_meta = st.columns(2)
+        meta_estipulada = col1_meta.number_input('**Meta Sugerida R$**', min_value=0.0, format='%.2f', value=anual)
+        patrimonio_final = meta_estipulada + valor_inicio
+
+        with col2_meta.container(border=True):
+            st.markdown(f'**Patrimônio Estimado Pós Meta:**\n\nR$ {patrimonio_final:.2f}')
